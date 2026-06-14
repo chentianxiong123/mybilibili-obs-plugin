@@ -22,23 +22,23 @@ jobs:
       - name: Setup Visual Studio
         uses: microsoft/setup-msbuild@v2
 
-      - name: Download OBS dependencies
+      - name: Download OBS deps
         shell: pwsh
         run: |
-          # OBS Studio 31.1.1 headers
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-studio/archive/refs/tags/31.1.1.zip" -OutFile "$env:RUNNER_TEMP\obs.zip"
-          Expand-Archive "$env:RUNNER_TEMP\obs.zip" -DestinationPath "$env:RUNNER_TEMP\obs-src"
-          Write-Host "OBS headers downloaded"
+          Write-Host "Downloading OBS dependencies..."
+          # OBS dependencies (libobs + CURL + FFmpeg + etc)
+          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2026-06-02/windows-deps-2026-06-02-x64.zip" -OutFile "$env:RUNNER_TEMP\deps.zip"
+          Expand-Archive "$env:RUNNER_TEMP\deps.zip" -DestinationPath "$env:RUNNER_TEMP\obs-deps" -Force
+          Write-Host "OBS deps done"
 
-          # Pre-built deps (libobs, curl, etc)
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2025-07-11/obs-deps-windows-x64-2025-07-11.zip" -OutFile "$env:RUNNER_TEMP\obs-deps.zip"
-          Expand-Archive "$env:RUNNER_TEMP\obs-deps.zip" -DestinationPath "$env:RUNNER_TEMP\obs-deps"
-          Write-Host "OBS deps downloaded"
+          # Qt6 dependencies
+          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2026-06-02/windows-deps-qt6-2026-06-02-x64-RelWithDebInfo.zip" -OutFile "$env:RUNNER_TEMP\qt6.zip"
+          Expand-Archive "$env:RUNNER_TEMP\qt6.zip" -DestinationPath "$env:RUNNER_TEMP\qt6" -Force
+          Write-Host "Qt6 deps done"
 
-          # Qt6 deps
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2025-07-11/qt6-windows-x64-2025-07-11.zip" -OutFile "$env:RUNNER_TEMP\qt6.zip"
-          Expand-Archive "$env:RUNNER_TEMP\qt6.zip" -DestinationPath "$env:RUNNER_TEMP\qt6"
-          Write-Host "Qt6 deps downloaded"
+          # List contents for debugging
+          Write-Host "obs-deps contents:"
+          Get-ChildItem "$env:RUNNER_TEMP\obs-deps" -Depth 0 | Select-Object Name
 
       - name: Configure CMake
         shell: pwsh
@@ -54,7 +54,7 @@ jobs:
         run: |
           cmake --build build --config RelWithDebInfo --parallel
 
-      - name: Upload plugin DLL
+      - name: Upload DLL
         uses: actions/upload-artifact@v4
         with:
           name: mybilibili-obs-plugin-windows-x64

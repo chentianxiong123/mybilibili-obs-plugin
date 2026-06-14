@@ -168,7 +168,7 @@ void HttpClient::getAsync(const std::string &url, const std::vector<std::string>
 {
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-		async_queue.push({url, "", headers, callback, false, timeout_ms});
+		async_queue.push({url, "", headers, callback, false, false, timeout_ms});
 	}
 	queue_cv.notify_one();
 }
@@ -179,7 +179,7 @@ void HttpClient::postAsync(const std::string &url, const std::string &data,
 {
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-		async_queue.push({url, data, headers, callback, true, timeout_ms});
+		async_queue.push({url, data, headers, callback, true, false, timeout_ms});
 	}
 	queue_cv.notify_one();
 }
