@@ -1,0 +1,8 @@
+*.dll
+*.pdb
+build*/
+release/
+RelWithDebInfo/
+.deps/
+build_x64/
+rundir/

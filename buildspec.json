@@ -4,28 +4,20 @@
             "version": "32.1.2",
             "baseUrl": "https://github.com/obsproject/obs-studio/archive/refs/tags",
             "label": "OBS sources",
-            "hashes": {
-                "windows-x64": ""
-            }
+            "hashes": {}
         },
         "prebuilt": {
             "version": "2026-06-02",
             "baseUrl": "https://github.com/obsproject/obs-deps/releases/download",
             "label": "Pre-Built obs-deps",
-            "hashes": {
-                "windows-x64": ""
-            }
+            "hashes": {}
         },
         "qt6": {
             "version": "2026-06-02",
             "baseUrl": "https://github.com/obsproject/obs-deps/releases/download",
             "label": "Pre-Built Qt6",
-            "hashes": {
-                "windows-x64": ""
-            },
-            "debugSymbols": {
-                "windows-x64": ""
-            }
+            "hashes": {},
+            "debugSymbols": {}
         }
     },
     "platformConfig": {
