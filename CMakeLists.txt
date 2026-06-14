@@ -1,95 +1,88 @@
-cmake_minimum_required(VERSION 3.20)
-project(mybilibili-obs-plugin)
+cmake_minimum_required(VERSION 3.28...3.30)
 
-# ── Bootstrap the cmake/common build system ─────────────
-# Sets up: CMAKE_MODULE_PATH, OS detection, build types,
-# PLUGIN_VERSION from buildspec.json, etc.
-include(cmake/common/bootstrap.cmake)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)
 
-# ── OS-specific defaults + dependency download ──────────
-# On Windows: includes cmake/windows/buildspec.cmake which
-# calls _check_dependencies_windows() → downloads:
-#   - obs-studio source (for libobs headers & lib)
-#   - obs-deps (prebuilt 3rd-party libs: ffmpeg, curl, ...)
-#   - Qt6
-# Then compiles libobs + obs-frontend-api from source.
+project(${_name} VERSION ${_version})
+
+option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" OFF)
+option(ENABLE_QT "Use Qt functionality" OFF)
+
+include(compilerconfig)
 include(defaults)
+include(helpers)
 
-# ── Git commit hash ──────────────────────────────────────
+configure_file(src/plugin-support.c.in src/plugin-support.c @ONLY)
+
 execute_process(
   COMMAND git rev-parse --short HEAD
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  OUTPUT_VARIABLE _git_hash
+  OUTPUT_VARIABLE GIT_COMMIT_HASH
   OUTPUT_STRIP_TRAILING_WHITESPACE
   ERROR_QUIET
 )
-if(NOT _git_hash)
-  set(_git_hash "unknown")
+if(NOT GIT_COMMIT_HASH)
+  set(GIT_COMMIT_HASH "unknown")
 endif()
 
-# ── Find OBS packages ──────────────────────────────────
-# After _setup_obs_studio(), the OBS Development component
-# is installed to CMAKE_PREFIX_PATH with cmake config files.
-find_package(LibObs REQUIRED)
-find_package(obs-frontend-api REQUIRED)
-
-# ── Qt6 (from obs-deps-qt6) ─────────────────────────────
-find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
-
-# ── CURL (from obs-deps) ────────────────────────────────
-find_package(CURL REQUIRED)
-
-# ── Qt MOC (for Q_OBJECT in plugin-main.cpp) ──────────
-set(CMAKE_AUTOMOC ON)
-
-# ── Plugin library ──────────────────────────────────────
 add_library(${CMAKE_PROJECT_NAME} MODULE
-  src/mybili_api.hpp
-  src/http_client.hpp
-  src/plugin_utils.hpp
-  src/md5.hpp
-  src/qrcodegen/qrcodegen.hpp
-  src/json11/json11.hpp
-  src/core/config_manager.hpp
-  src/core/qr_generator.hpp
-  src/ui/menu_manager.hpp
-  src/ui/dialog_factory.hpp
-  src/plugin-main.cpp
-  src/mybili_api.cpp
-  src/http_client.cpp
-  src/plugin_utils.cpp
-  src/md5.cpp
-  src/qrcodegen/qrcodegen.cpp
-  src/json11/json11.cpp
-  src/core/config_manager.cpp
-  src/core/qr_generator.cpp
-  src/ui/menu_manager.cpp
-  src/ui/dialog_factory.cpp
+        src/bilibili_api.hpp
+        src/http_client.hpp
+        src/plugin_utils.hpp
+        src/md5.hpp
+        src/qrcodegen/qrcodegen.hpp
+        src/json11/json11.hpp
+        src/core/config_manager.hpp
+        src/core/qr_generator.hpp
+        src/ui/menu_manager.hpp
+        src/ui/dialog_factory.hpp
+        src/plugin-main.cpp
+        src/bilibili_api.cpp
+        src/http_client.cpp
+        src/plugin_utils.cpp
+        src/md5.cpp
+        src/qrcodegen/qrcodegen.cpp
+        src/json11/json11.cpp
+        src/core/config_manager.cpp
+        src/core/qr_generator.cpp
+        src/ui/menu_manager.cpp
+        src/ui/dialog_factory.cpp
 )
 
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-  src
-)
-
+find_package(libobs REQUIRED)
+find_package(CURL REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
-  OBS::libobs
-  OBS::obs-frontend-api
-  Qt6::Widgets
-  Qt6::Core
-  CURL::libcurl
+        OBS::libobs
+        CURL::libcurl
 )
+
+if(ENABLE_FRONTEND_API)
+  find_package(obs-frontend-api REQUIRED)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
+endif()
+
+if(ENABLE_QT)
+  find_package(Qt6 COMPONENTS Widgets Core)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
+  target_compile_options(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
+  )
+  set_target_properties(
+    ${CMAKE_PROJECT_NAME}
+    PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
+  )
+endif()
+
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.cpp)
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-  PLUGIN_VERSION_STR="${PLUGIN_VERSION}"
-  GIT_COMMIT_HASH="${_git_hash}"
+    "PLUGIN_VERSION_STR=\"${_version}\""
+    "GIT_COMMIT_HASH=\"${GIT_COMMIT_HASH}\""
 )
 
-# ── Platform tweaks ─────────────────────────────────────
-if(MSVC)
-  target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE /W0)
-endif()
+set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
 
-set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
-  PREFIX ""
-  SUFFIX ".dll"
+# Install plugin and dependencies
+install(TARGETS ${CMAKE_PROJECT_NAME}
+        LIBRARY DESTINATION "${CMAKE_INSTALL_PREFIX}/obs-plugins/64bit"
 )

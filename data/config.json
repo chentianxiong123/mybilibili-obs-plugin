@@ -1,10 +1,10 @@
 {
     "title": "",
-    "roomId": 0,
-    "userId": 0,
-    "roomName": "我的直播间",
+    "room_id": "624",
     "token": "",
     "refreshToken": "",
-    "streamKey": "",
-    "rtmpAddr": "rtmp://localhost/live"
+    "rtmp_addr": "",
+    "rtmp_code": "",
+    "part_id": 2,
+    "area_id": 86
 }

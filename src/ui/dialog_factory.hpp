@@ -3,15 +3,17 @@
 #include <QString>
 #include <string>
 #include <functional>
-#include "mybili_api.hpp"
 
 namespace UI {
 class DialogFactory {
 public:
-	static void message(const QString &msg, const QString &title, QWidget *parent = nullptr);
-	static QDialog *qrLogin(QWidget *parent, MyBili::Config &config);
-	static QDialog *streamStarted(QWidget *parent, const std::string &rtmpAddr, const std::string &streamKey);
-	static QDialog *roomSettings(QWidget *parent, const std::string &currentRoomName,
-				     std::function<void(const std::string &newName)> onApply);
+    static void message(const QString &msg, const QString &title, QWidget *parent = nullptr);
+    static QDialog *qrLogin(QWidget *parent, const std::string &qrData, std::string &qrKey,
+                     std::function<void(const std::string &cookies)> onSuccess);
+    static QDialog *streamStarted(QWidget *parent, const std::string &rtmpAddr, const std::string &rtmpCode);
+    static QDialog *faceAuth(QWidget *parent, const std::string &faceUrl);
+    // Simplified room settings — no B站 partition/area
+    static QDialog *roomSettings(QWidget *parent, const std::string &roomUrl, const std::string &currentTitle,
+                    std::function<void(const std::string &title)> onApply);
 };
 } // namespace UI

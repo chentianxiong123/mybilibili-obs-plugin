@@ -8,17 +8,17 @@
 #include "ui/dialog_factory.hpp"
 #include "core/config_manager.hpp"
 #include "core/qr_generator.hpp"
-#include "mybili_api.hpp"
+#include "bilibili_api.hpp"
 #include "plugin_utils.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
-class MybilibiliPlugin : public QObject {
+class BilibiliStreamPlugin : public QObject {
 	Q_OBJECT
 public:
-	explicit MybilibiliPlugin(QMainWindow *parent);
-	~MybilibiliPlugin();
+	explicit BilibiliStreamPlugin(QMainWindow *parent);
+	~BilibiliStreamPlugin();
 
 private slots:
 	void onScanQrcode();
@@ -29,30 +29,32 @@ private slots:
 private:
 	void updateLoginStatus();
 	void openLiveRoom();
-	void fetchRoomInfo();
 
 	Core::ConfigManager m_config;
 	UI::MenuManager *m_menu;
 };
 
-MybilibiliPlugin::MybilibiliPlugin(QMainWindow *parent)
+BilibiliStreamPlugin::BilibiliStreamPlugin(QMainWindow *parent)
 	: QObject(nullptr), m_menu(new UI::MenuManager(parent->menuBar(), this))
 {
 	m_config.load();
 
-	connect(m_menu, &UI::MenuManager::scanQrcodeClicked, this, &MybilibiliPlugin::onScanQrcode);
-	connect(m_menu, &UI::MenuManager::streamToggleClicked, this, &MybilibiliPlugin::onStreamToggle);
-	connect(m_menu, &UI::MenuManager::openRoomClicked, this, &MybilibiliPlugin::onOpenRoom);
-	connect(m_menu, &UI::MenuManager::updateRoomInfoClicked, this, &MybilibiliPlugin::onUpdateRoomInfo);
+	connect(m_menu, &UI::MenuManager::scanQrcodeClicked, this, &BilibiliStreamPlugin::onScanQrcode);
+	connect(m_menu, &UI::MenuManager::streamToggleClicked, this, &BilibiliStreamPlugin::onStreamToggle);
+	connect(m_menu, &UI::MenuManager::openRoomClicked, this, &BilibiliStreamPlugin::onOpenRoom);
+	connect(m_menu, &UI::MenuManager::updateRoomInfoClicked, this, &BilibiliStreamPlugin::onUpdateRoomInfo);
 
-	// Check if we have a token and try to restore login
 	auto &cfg = m_config.config();
-	if (!cfg.token.empty()) {
-		// Try to fetch room info to verify token validity
-		std::string msg;
-		if (MyBili::MbgApi::getMyRoom(cfg, msg)) {
-			cfg.loginStatus = true;
-			m_config.save();
+	if (!cfg.cookies.empty()) {
+		std::string message;
+		if (Bili::BiliApi::checkLoginStatus(cfg.cookies, message, cfg.mid)) {
+			cfg.login_status = true;
+			std::string newRoomId, newCsrfToken;
+			if (Bili::BiliApi::getRoomIdAndCsrf(cfg.cookies, newRoomId, newCsrfToken, message)) {
+				cfg.room_id = newRoomId;
+				cfg.csrf_token = newCsrfToken;
+				m_config.save();
+			}
 		}
 	}
 
@@ -62,67 +64,69 @@ MybilibiliPlugin::MybilibiliPlugin(QMainWindow *parent)
 	}
 }
 
-MybilibiliPlugin::~MybilibiliPlugin()
+BilibiliStreamPlugin::~BilibiliStreamPlugin()
 {
-	obs_log(LOG_DEBUG, "释放 mybilibili 插件资源");
+	obs_log(LOG_DEBUG, "释放 BilibiliStreamPlugin 资源");
 }
 
-void MybilibiliPlugin::updateLoginStatus()
+void BilibiliStreamPlugin::updateLoginStatus()
 {
 	auto &cfg = m_config.config();
-	m_menu->actions().loginStatus->setText(cfg.loginStatus ? "登录状态: 已登录" : "登录状态: 未登录");
-	m_menu->actions().loginStatus->setChecked(cfg.loginStatus);
+	m_menu->actions().loginStatus->setText(cfg.login_status ? "登录状态: 已登录" : "登录状态: 未登录");
+	m_menu->actions().loginStatus->setChecked(cfg.login_status);
 }
 
-void MybilibiliPlugin::openLiveRoom()
+void BilibiliStreamPlugin::openLiveRoom()
 {
 	auto &cfg = m_config.config();
-	if (cfg.roomId <= 0) {
-		UI::DialogFactory::message(QString::fromUtf8("没有直播间信息，请先登录"), "消息");
+	if (cfg.room_id.empty()) {
+		UI::DialogFactory::message(QString::fromUtf8("room_id 为空，请先登录或更新直播间信息"), "消息");
 		return;
 	}
-	const QString url = QString("https://m.mybilibili.cn/m/live/%1").arg(cfg.roomId);
+	const QString url = QString("https://live.bilibili.com/%1").arg(QString::fromStdString(cfg.room_id));
 	if (!QDesktopServices::openUrl(QUrl(url))) {
 		UI::DialogFactory::message(QStringLiteral("无法打开浏览器，请手动访问：\n") + url, "消息");
 	}
 }
 
-void MybilibiliPlugin::onOpenRoom()
+void BilibiliStreamPlugin::onOpenRoom()
 {
 	openLiveRoom();
 }
 
-void MybilibiliPlugin::onScanQrcode()
+void BilibiliStreamPlugin::onScanQrcode()
 {
 	auto &cfg = m_config.config();
-	auto parent = (QWidget *)obs_frontend_get_main_window();
-
-	UI::DialogFactory::qrLogin(parent, cfg);
-
-	// After QR dialog closes, check if we have a token
-	if (!cfg.token.empty()) {
-		std::string msg;
-		cfg.loginStatus = MyBili::MbgApi::getMyRoom(cfg, msg);
-		if (cfg.loginStatus) {
-			m_config.save();
-			updateLoginStatus();
-			UI::DialogFactory::message(
-				QString::fromUtf8(("登录成功！直播间: " + cfg.roomName).c_str()),
-				"消息");
-		} else {
-			cfg.loginStatus = false;
-			UI::DialogFactory::message(QString::fromUtf8(msg), "登录失败");
-		}
+	std::string qrData, qrKey, message;
+	if (!Bili::BiliApi::getQrCode(cfg.cookies, qrData, qrKey, message)) {
+		obs_log(LOG_ERROR, "获取二维码失败");
+		UI::DialogFactory::message(QString::fromUtf8(message), "消息");
+		return;
 	}
+
+	auto parent = (QWidget *)obs_frontend_get_main_window();
+	UI::DialogFactory::qrLogin(parent, qrData, qrKey, [this, &cfg](const std::string &cookies) {
+		std::string msg;
+		cfg.cookies = cookies;
+		cfg.login_status = Bili::BiliApi::checkLoginStatus(cfg.cookies, msg, cfg.mid);
+		updateLoginStatus();
+
+		std::string newRoomId, newCsrfToken;
+		if (Bili::BiliApi::getRoomIdAndCsrf(cfg.cookies, newRoomId, newCsrfToken, msg)) {
+			cfg.room_id = newRoomId;
+			cfg.csrf_token = newCsrfToken;
+		}
+		m_config.save();
+	});
 }
 
-void MybilibiliPlugin::onStreamToggle()
+void BilibiliStreamPlugin::onStreamToggle()
 {
 	auto &cfg = m_config.config();
 	std::string message;
 
 	if (cfg.streaming) {
-		if (MyBili::MbgApi::stopLive(cfg, message)) {
+		if (Bili::BiliApi::stopLive(cfg, message)) {
 			m_menu->actions().streamToggle->setText("开始直播");
 			cfg.streaming = false;
 			m_config.save();
@@ -130,69 +134,63 @@ void MybilibiliPlugin::onStreamToggle()
 		} else {
 			UI::DialogFactory::message(QString::fromUtf8(message), "消息");
 		}
+	} else if (!cfg.area_id) {
+		UI::DialogFactory::message(QString::fromUtf8("请更新直播间分区"), "消息");
 	} else {
-		if (!cfg.loginStatus || cfg.roomId <= 0) {
-			UI::DialogFactory::message(QString::fromUtf8("请先扫码登录"), "消息");
-			return;
-		}
-
-		// Mark as live in backend
-		if (MyBili::MbgApi::startLive(cfg, message)) {
+		std::string rtmpAddr, rtmpCode, faceQr;
+		if (Bili::BiliApi::startLive(cfg, rtmpAddr, rtmpCode, message, faceQr, cfg.mid)) {
 			m_menu->actions().streamToggle->setText("停止直播");
 			cfg.streaming = true;
+			cfg.rtmp_addr = rtmpAddr;
+			cfg.rtmp_code = rtmpCode;
 			m_config.save();
-			// Show RTMP info dialog
-			UI::DialogFactory::streamStarted(
-				(QWidget *)obs_frontend_get_main_window(),
-				cfg.rtmpAddr,
-				cfg.streamKey);
+			UI::DialogFactory::streamStarted((QWidget *)obs_frontend_get_main_window(), rtmpAddr, rtmpCode);
 		} else {
-			UI::DialogFactory::message(QString::fromUtf8(message), "开播失败");
+			if (!faceQr.empty()) {
+				UI::DialogFactory::faceAuth((QWidget *)obs_frontend_get_main_window(), faceQr);
+			} else {
+				UI::DialogFactory::message(QString::fromUtf8(message.c_str()), "开播失败");
+			}
 		}
 	}
 }
 
-void MybilibiliPlugin::onUpdateRoomInfo()
+void BilibiliStreamPlugin::onUpdateRoomInfo()
 {
 	auto &cfg = m_config.config();
 	auto parent = (QWidget *)obs_frontend_get_main_window();
 
-	UI::DialogFactory::roomSettings(parent, cfg.roomName,
-		[this, &cfg](const std::string &newName) {
-			std::string message;
-			if (MyBili::MbgApi::updateRoomInfo(cfg, newName, message)) {
-				m_config.save();
-				UI::DialogFactory::message(
-					QString::fromUtf8(("房间名称已更新为: " + newName).c_str()),
-					"消息");
-			} else {
-				UI::DialogFactory::message(
-					QString::fromUtf8(message),
-					"更新失败");
-			}
-		});
+	UI::DialogFactory::roomSettings(parent, cfg.room_id, cfg.title,
+				[this, &cfg](const std::string &title) {
+					std::string message;
+					if (!title.empty() && Bili::BiliApi::updateRoomInfo(cfg, title, message)) {
+						cfg.title = title;
+						m_config.save();
+						UI::DialogFactory::message(QString::fromUtf8("直播间标题已更新"), "消息");
+					}
+				});
 }
 
-static MybilibiliPlugin *plugin = nullptr;
+static BilibiliStreamPlugin *plugin = nullptr;
 
 bool obs_module_load(void)
 {
-	obs_log(LOG_INFO, "mybilibili 插件版本: %s, commit: %s", PLUGIN_VERSION, GIT_COMMIT_HASH);
-	MyBili::MbgApi::init();
+	obs_log(LOG_INFO, "插件版本: %s, commit: %s", PLUGIN_VERSION, PLUGIN_COMMIT);
+	Bili::BiliApi::init();
 	auto mainWindow = static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	if (!mainWindow)
 		return false;
-	plugin = new MybilibiliPlugin(mainWindow);
-	obs_log(LOG_INFO, "mybilibili 插件加载成功");
+	plugin = new BilibiliStreamPlugin(mainWindow);
+	obs_log(LOG_INFO, "插件加载成功");
 	return true;
 }
 
 void obs_module_unload(void)
 {
-	MyBili::MbgApi::cleanup();
+	Bili::BiliApi::cleanup();
 	delete plugin;
 	plugin = nullptr;
-	obs_log(LOG_INFO, "mybilibili 插件已卸载");
+	obs_log(LOG_INFO, "插件已卸载");
 }
 
 #include "plugin-main.moc"

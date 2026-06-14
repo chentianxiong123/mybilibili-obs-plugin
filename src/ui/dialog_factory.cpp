@@ -10,166 +10,163 @@
 #include <QApplication>
 #include <QClipboard>
 #include "core/qr_generator.hpp"
-#include "mybili_api.hpp"
+#include "bilibili_api.hpp"
 
 namespace UI {
 
 static QDialog *createBaseDialog(const QString &title, QWidget *parent)
 {
-	QDialog *dialog = new QDialog(parent);
-	dialog->setWindowTitle(title);
-	QVBoxLayout *layout = new QVBoxLayout(dialog);
-	dialog->setLayout(layout);
-	return dialog;
+    QDialog *dialog = new QDialog(parent);
+    dialog->setWindowTitle(title);
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+    dialog->setLayout(layout);
+    return dialog;
 }
 
 void DialogFactory::message(const QString &msg, const QString &title, QWidget *parent)
 {
-	QDialog *dialog = createBaseDialog(title, parent ? parent : (QWidget *)obs_frontend_get_main_window());
-	QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
-	layout->addWidget(new QLabel(msg));
-	QPushButton *confirm = new QPushButton("确认");
-	layout->addWidget(confirm);
-	QObject::connect(confirm, &QPushButton::clicked, dialog, &QDialog::accept);
-	QObject::connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
-	dialog->exec();
+    QDialog *dialog = createBaseDialog(title, parent ? parent : (QWidget *)obs_frontend_get_main_window());
+    QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
+    layout->addWidget(new QLabel(msg));
+    QPushButton *confirm = new QPushButton("确认");
+    layout->addWidget(confirm);
+    QObject::connect(confirm, &QPushButton::clicked, dialog, &QDialog::accept);
+    QObject::connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
+    dialog->exec();
 }
 
-/**
- * QR login dialog:
- * 1. Call POST /api/user/qr/generate to get qrId + qrUrl
- * 2. Display qrUrl as a QR code in the dialog
- * 3. Poll POST /api/user/qr/status every 2 seconds
- * 4. If status == "confirmed", save config (token) and close dialog
- */
-QDialog *DialogFactory::qrLogin(QWidget *parent, MyBili::Config &config)
+QDialog *DialogFactory::qrLogin(QWidget *parent, const std::string &qrData, std::string &qrKey,
+                std::function<void(const std::string &cookies)> onSuccess)
 {
-	QDialog *dialog = createBaseDialog("mybilibili 扫码登录", parent);
-	QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
+    QDialog *dialog = createBaseDialog("mybilibili 登录二维码", parent);
+    QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
 
-	QLabel *qrLabel = new QLabel();
-	QLabel *promptLabel = new QLabel("使用 mybilibili 手机客户端扫码登录");
-	layout->addWidget(qrLabel);
-	layout->addWidget(promptLabel);
+    QLabel *qrLabel = new QLabel();
+    QPixmap pixmap = Core::QrGenerator::generate(qrData);
+    if (pixmap.isNull()) {
+        qrLabel->setText("无法生成二维码");
+    } else {
+        qrLabel->setPixmap(pixmap);
+    }
+    layout->addWidget(qrLabel);
+    layout->addWidget(new QLabel("使用手机扫描二维码登录"));
 
-	// Step 1: generate QR
-	std::string qrId, qrUrl, genMsg;
-	if (!MyBili::MbgApi::generateQr(qrId, qrUrl, genMsg)) {
-		qrLabel->setText(QString::fromUtf8(genMsg));
-		promptLabel->setText("生成二维码失败");
-		QPushButton *closeBtn = new QPushButton("关闭");
-		layout->addWidget(closeBtn);
-		QObject::connect(closeBtn, &QPushButton::clicked, dialog, &QDialog::accept);
-		QObject::connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
-		dialog->exec();
-		return dialog;
-	}
+    QTimer *timer = new QTimer(dialog);
+    int retryCount = 0;
 
-	QPixmap pixmap = Core::QrGenerator::generate(qrUrl);
-	if (pixmap.isNull()) {
-		qrLabel->setText("无法生成二维码");
-		QPushButton *closeBtn = new QPushButton("关闭");
-		layout->addWidget(closeBtn);
-		QObject::connect(closeBtn, &QPushButton::clicked, dialog, &QDialog::accept);
-	} else {
-		qrLabel->setPixmap(pixmap);
-	}
+    auto timerCallback = [&, retryCount, qrKey, onSuccess, timer, qrLabel, dialog]() mutable {
+        if (retryCount > 180) {
+            timer->stop();
+            qrLabel->setText("二维码已过期，请重新打开");
+            return;
+        }
+        ++retryCount;
 
-	promptLabel->setText("请使用 mybilibili App 扫描二维码\n登录成功后请返回 OBS 继续操作");
+        std::string cookies, message;
+        if (Bili::BiliApi::qrLogin(qrKey, cookies, message)) {
+            timer->stop();
+            if (onSuccess)
+                onSuccess(cookies);
+            dialog->accept();
+        }
+    };
 
-	// Step 3: create timer to poll QR status
-	QTimer *timer = new QTimer(dialog);
-	int retryCount = 0;
+    QObject::connect(timer, &QTimer::timeout, timerCallback);
+    QObject::connect(dialog, &QDialog::finished, [timer, dialog]() {
+        timer->stop();
+        dialog->deleteLater();
+    });
 
-	auto timerCallback = [=, &config]() mutable {
-		if (retryCount > 150) { // 5 min
-			timer->stop();
-			promptLabel->setText("二维码已过期，请重新扫码");
-			return;
-		}
-		++retryCount;
-
-		std::string pollMsg;
-		if (MyBili::MbgApi::pollQrStatus(qrId, config, pollMsg)) {
-			timer->stop();
-			promptLabel->setText("扫码成功！");
-			QTimer::singleShot(500, dialog, [=]() {
-				dialog->accept();
-			});
-		}
-	};
-
-	QObject::connect(timer, &QTimer::timeout, timerCallback);
-	QObject::connect(dialog, &QDialog::finished, [timer, dialog]() {
-		timer->stop();
-		dialog->deleteLater();
-	});
-
-	timer->start(2000); // poll every 2 seconds
-	dialog->exec();
-	return dialog;
+    timer->start(1000);
+    dialog->exec();
+    return dialog;
 }
 
-QDialog *DialogFactory::streamStarted(QWidget *parent, const std::string &rtmpAddr, const std::string &streamKey)
+QDialog *DialogFactory::streamStarted(QWidget *parent, const std::string &rtmpAddr, const std::string &rtmpCode)
 {
-	QDialog *dialog = createBaseDialog("开始直播", parent);
-	QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
+    QDialog *dialog = createBaseDialog("消息", parent);
+    QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
 
-	layout->addWidget(new QLabel(
-		QString("推流信息已就绪，请在 OBS 设置中填入以下信息：\n\n"
-			"服务: 自定义\n"
-			"服务器: %1\n"
-			"流密钥: %2\n\n"
-			"然后点击 OBS 右下角的「开始直播」按钮。")
-			.arg(QString::fromStdString(rtmpAddr), QString::fromStdString(streamKey))));
+    layout->addWidget(new QLabel(
+        QString("直播已开始，请复制以下内容进行推流\n"
+            "RTMP 地址: %1\n推流码: %2")
+            .arg(QString::fromStdString(rtmpAddr), QString::fromStdString(rtmpCode))));
 
-	QPushButton *copyFull = new QPushButton("复制服务器地址");
-	QPushButton *copyKey = new QPushButton("复制流密钥");
-	QPushButton *confirm = new QPushButton("已开始推流");
+    QPushButton *copy = new QPushButton("复制");
+    QPushButton *confirm = new QPushButton("确认");
+    layout->addWidget(copy);
+    layout->addWidget(confirm);
 
-	QHBoxLayout *btnRow = new QHBoxLayout();
-	btnRow->addWidget(copyFull);
-	btnRow->addWidget(copyKey);
-	layout->addLayout(btnRow);
-	layout->addWidget(confirm);
+    QObject::connect(copy, &QPushButton::clicked, [=]() {
+        QApplication::clipboard()->setText(QString("推流地址: %1\n推流码: %2")
+                          .arg(QString::fromStdString(rtmpAddr), QString::fromStdString(rtmpCode)));
+    });
+    QObject::connect(confirm, &QPushButton::clicked, dialog, &QDialog::accept);
+    QObject::connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
 
-	QObject::connect(copyFull, &QPushButton::clicked, [=]() {
-		QApplication::clipboard()->setText(QString::fromStdString(rtmpAddr));
-	});
-	QObject::connect(copyKey, &QPushButton::clicked, [=]() {
-		QApplication::clipboard()->setText(QString::fromStdString(streamKey));
-	});
-	QObject::connect(confirm, &QPushButton::clicked, dialog, &QDialog::accept);
-	QObject::connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
-
-	dialog->exec();
-	return dialog;
+    dialog->exec();
+    return dialog;
 }
 
-QDialog *DialogFactory::roomSettings(QWidget *parent, const std::string &currentRoomName,
-				     std::function<void(const std::string &newName)> onApply)
+QDialog *DialogFactory::faceAuth(QWidget *parent, const std::string &faceUrl)
 {
-	QDialog *dialog = createBaseDialog("更新房间名称", parent);
-	QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
+    QDialog *dialog = createBaseDialog("实名认证（人脸识别）", parent);
+    QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
 
-	QLineEdit *nameInput = new QLineEdit(QString::fromStdString(currentRoomName));
-	layout->addWidget(new QLabel("直播间名称:"));
-	layout->addWidget(nameInput);
+    QLabel *qrLabel = new QLabel();
+    QPixmap pixmap = Core::QrGenerator::generate(faceUrl);
+    if (pixmap.isNull()) {
+        qrLabel->setText("二维码生成失败，请检查网络或日志");
+    } else {
+        qrLabel->setPixmap(pixmap);
+    }
+    qrLabel->setAlignment(Qt::AlignCenter);
 
-	QPushButton *confirmBtn = new QPushButton("确认更新");
-	layout->addWidget(confirmBtn);
+    QLabel *tipLabel = new QLabel(
+        "请使用<b>手机 mybilibili App</b> 扫描下方二维码完成人脸认证。<br>"
+        "认证完成后，请重新点击开始直播。");
+    tipLabel->setWordWrap(true);
+    tipLabel->setAlignment(Qt::AlignCenter);
 
-	QObject::connect(confirmBtn, &QPushButton::clicked, [=]() {
-		std::string newName = nameInput->text().trimmed().toUtf8().constData();
-		if (!newName.empty() && onApply) {
-			onApply(newName);
-		}
-		dialog->accept();
-	});
+    QPushButton *closeBtn = new QPushButton("我已完成认证");
 
-	QObject::connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
-	dialog->exec();
-	return dialog;
+    layout->addWidget(tipLabel);
+    layout->addWidget(qrLabel);
+    layout->addWidget(closeBtn);
+
+    QObject::connect(closeBtn, &QPushButton::clicked, dialog, &QDialog::accept);
+    QObject::connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
+
+    dialog->exec();
+    return dialog;
+}
+
+QDialog *DialogFactory::roomSettings(QWidget *parent, const std::string &roomUrl, const std::string &currentTitle,
+                    std::function<void(const std::string &title)> onApply)
+{
+    QDialog *dialog = createBaseDialog("更新直播间信息", parent);
+    QVBoxLayout *layout = (QVBoxLayout *)dialog->layout();
+
+    layout->addWidget(new QLabel(QString("直播间 ID: %1").arg(QString::fromStdString(roomUrl))));
+
+    QLineEdit *titleInput = new QLineEdit(QString::fromStdString(currentTitle));
+    QPushButton *confirmTitle = new QPushButton("确认");
+    QHBoxLayout *titleRow = new QHBoxLayout();
+    titleRow->addWidget(new QLabel("直播间标题:"));
+    titleRow->addWidget(titleInput);
+    titleRow->addWidget(confirmTitle);
+    layout->addLayout(titleRow);
+
+    QObject::connect(confirmTitle, &QPushButton::clicked, [=]() {
+        if (onApply) {
+            onApply(titleInput->text().trimmed().toUtf8().constData());
+        }
+        dialog->accept();
+    });
+
+    QObject::connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
+    dialog->exec();
+    return dialog;
 }
 
 } // namespace UI

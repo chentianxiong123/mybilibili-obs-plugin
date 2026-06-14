@@ -3,7 +3,7 @@
 #include <cstdarg>
 #include <string>
 
-const char *PLUGIN_NAME = "mybilibili-obs-plugin";
+const char *PLUGIN_NAME = "obs-bilibili-stream";
 const char *PLUGIN_VERSION = PLUGIN_VERSION_STR;
 const char *PLUGIN_COMMIT = GIT_COMMIT_HASH;
 

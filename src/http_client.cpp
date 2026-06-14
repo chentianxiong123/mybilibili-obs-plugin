@@ -40,7 +40,6 @@ struct AsyncRequest {
 	std::vector<std::string> headers;
 	std::function<void(HttpResponse)> callback;
 	bool is_post;
-	bool is_put;
 	long timeout_ms;
 };
 
@@ -63,8 +62,6 @@ static void workerLoop()
 
 		HttpResponse response;
 		if (req.is_post) {
-			} else if (req.is_put) {
-				response = HttpClient::put(req.url, req.data, req.headers, req.timeout_ms);
 			response = HttpClient::post(req.url, req.data, req.headers, req.timeout_ms);
 		} else {
 			response = HttpClient::get(req.url, req.headers, req.timeout_ms);
@@ -84,7 +81,7 @@ void HttpClient::cleanup()
 {
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-			stop_worker = true;
+		stop_worker = true;
 	}
 	queue_cv.notify_all();
 	if (worker_thread.joinable())
@@ -92,9 +89,7 @@ void HttpClient::cleanup()
 	curl_global_cleanup();
 }
 
-static HttpResponse curlPerform(const std::string &url, const std::string &data,
-				const std::vector<std::string> &headers, long timeout_ms,
-				bool isPost, bool isPut)
+HttpResponse HttpClient::get(const std::string &url, const std::vector<std::string> &headers, long timeout_ms)
 {
 	HttpResponse response;
 	response.status = 0;
@@ -113,14 +108,6 @@ static HttpResponse curlPerform(const std::string &url, const std::string &data,
 	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response_cookies);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout_ms);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-	if (isPost) {
-		curl_easy_setopt(curl, CURLOPT_POST, 1L);
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.c_str());
-	} else if (isPut) {
-		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.c_str());
-	}
 
 	struct curl_slist *header_list = nullptr;
 	for (const auto &header : headers) {
@@ -146,21 +133,98 @@ static HttpResponse curlPerform(const std::string &url, const std::string &data,
 	return response;
 }
 
-HttpResponse HttpClient::get(const std::string &url, const std::vector<std::string> &headers, long timeout_ms)
-{
-	return curlPerform(url, "", headers, timeout_ms, false, false);
-}
-
 HttpResponse HttpClient::post(const std::string &url, const std::string &data,
 			      const std::vector<std::string> &headers, long timeout_ms)
 {
-	return curlPerform(url, data, headers, timeout_ms, true, false);
+	HttpResponse response;
+	response.status = 0;
+	CURL *curl = curl_easy_init();
+	if (!curl) {
+		response.data = "CURL 初始化失败";
+		return response;
+	}
+
+	std::string response_data;
+	std::string response_cookies;
+	curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+	curl_easy_setopt(curl, CURLOPT_POST, 1L);
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.c_str());
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
+	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
+	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response_cookies);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout_ms);
+	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+	struct curl_slist *header_list = nullptr;
+	for (const auto &header : headers) {
+		header_list = curl_slist_append(header_list, header.c_str());
+	}
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+
+	CURLcode res = curl_easy_perform(curl);
+	if (res != CURLE_OK) {
+		response.timeout = (res == CURLE_OPERATION_TIMEDOUT);
+		response.data = std::string("网络错误: ") + curl_easy_strerror(res);
+		response.status = 0;
+		curl_slist_free_all(header_list);
+		curl_easy_cleanup(curl);
+		return response;
+	}
+
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status);
+	response.data = std::move(response_data);
+	response.cookies = std::move(response_cookies);
+	curl_slist_free_all(header_list);
+	curl_easy_cleanup(curl);
+	return response;
 }
 
 HttpResponse HttpClient::put(const std::string &url, const std::string &data,
-			     const std::vector<std::string> &headers, long timeout_ms)
+			      const std::vector<std::string> &headers, long timeout_ms)
 {
-	return curlPerform(url, data, headers, timeout_ms, false, true);
+	HttpResponse response;
+	response.status = 0;
+	CURL *curl = curl_easy_init();
+	if (!curl) {
+		response.data = "CURL 初始化失败";
+		return response;
+	}
+
+	std::string response_data;
+	std::string response_cookies;
+	curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.c_str());
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
+	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
+	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response_cookies);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout_ms);
+	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+	struct curl_slist *header_list = nullptr;
+	for (const auto &header : headers) {
+		header_list = curl_slist_append(header_list, header.c_str());
+	}
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+
+	CURLcode res = curl_easy_perform(curl);
+	if (res != CURLE_OK) {
+		response.timeout = (res == CURLE_OPERATION_TIMEDOUT);
+		response.data = std::string("网络错误: ") + curl_easy_strerror(res);
+		response.status = 0;
+		curl_slist_free_all(header_list);
+		curl_easy_cleanup(curl);
+		return response;
+	}
+
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status);
+	response.data = std::move(response_data);
+	response.cookies = std::move(response_cookies);
+	curl_slist_free_all(header_list);
+	curl_easy_cleanup(curl);
+	return response;
 }
 
 void HttpClient::getAsync(const std::string &url, const std::vector<std::string> &headers,
@@ -168,7 +232,7 @@ void HttpClient::getAsync(const std::string &url, const std::vector<std::string>
 {
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-		async_queue.push({url, "", headers, callback, false, false, timeout_ms});
+		async_queue.push({url, "", headers, callback, false, timeout_ms});
 	}
 	queue_cv.notify_one();
 }
@@ -179,7 +243,7 @@ void HttpClient::postAsync(const std::string &url, const std::string &data,
 {
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-		async_queue.push({url, data, headers, callback, true, false, timeout_ms});
+		async_queue.push({url, data, headers, callback, true, timeout_ms});
 	}
 	queue_cv.notify_one();
 }
