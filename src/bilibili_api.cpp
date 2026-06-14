@@ -1,7 +1,8 @@
 #include "bilibili_api.hpp"
 #include "http_client.hpp"
 #include "plugin_utils.hpp"
-#include "util/base.h"
+#include <obs-module.h>
+#include <util/bmem.h>
 #include <sstream>
 
 // ============================================================
