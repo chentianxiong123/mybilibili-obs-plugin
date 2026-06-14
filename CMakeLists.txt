@@ -37,11 +37,7 @@ find_package(obs-frontend-api REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
 
 # ── CURL (from obs-deps) ────────────────────────────────
-find_path(CURL_INCLUDE_DIR curl/curl.h)
-find_library(CURL_LIBRARY NAMES curl libcurl)
-if(NOT CURL_INCLUDE_DIR OR NOT CURL_LIBRARY)
-  message(FATAL_ERROR "CURL not found in CMAKE_PREFIX_PATH (check obs-deps)")
-endif()
+find_package(CURL REQUIRED)
 
 # ── Plugin library ──────────────────────────────────────
 add_library(${CMAKE_PROJECT_NAME} MODULE
@@ -70,7 +66,6 @@ add_library(${CMAKE_PROJECT_NAME} MODULE
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
   src
-  ${CURL_INCLUDE_DIR}
 )
 
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
@@ -78,7 +73,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
   OBS::obs-frontend-api
   Qt6::Widgets
   Qt6::Core
-  ${CURL_LIBRARY}
+  CURL::libcurl
 )
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
