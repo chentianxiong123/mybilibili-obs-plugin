@@ -39,6 +39,9 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
 # ── CURL (from obs-deps) ────────────────────────────────
 find_package(CURL REQUIRED)
 
+# ── Qt MOC (for Q_OBJECT in plugin-main.cpp) ──────────
+set(CMAKE_AUTOMOC ON)
+
 # ── Plugin library ──────────────────────────────────────
 add_library(${CMAKE_PROJECT_NAME} MODULE
   src/mybili_api.hpp
