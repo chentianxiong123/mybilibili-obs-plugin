@@ -14,53 +14,23 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Visual Studio
+      - name: Set up Visual Studio shell
         uses: microsoft/setup-msbuild@v2
 
-      - name: Download OBS deps
+      - name: Run Windows build script
         shell: pwsh
         run: |
-          Write-Host "Downloading OBS dependencies..."
-          # OBS dependencies (libobs + CURL + FFmpeg + etc)
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2026-06-02/windows-deps-2026-06-02-x64.zip" -OutFile "$env:RUNNER_TEMP\deps.zip"
-          Expand-Archive "$env:RUNNER_TEMP\deps.zip" -DestinationPath "$env:RUNNER_TEMP\obs-deps" -Force
-          Write-Host "OBS deps done"
+          .github/scripts/Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
 
-          # Qt6 dependencies
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2026-06-02/windows-deps-qt6-2026-06-02-x64-RelWithDebInfo.zip" -OutFile "$env:RUNNER_TEMP\qt6.zip"
-          Expand-Archive "$env:RUNNER_TEMP\qt6.zip" -DestinationPath "$env:RUNNER_TEMP\qt6" -Force
-          Write-Host "Qt6 deps done"
-
-          # List contents for debugging
-          Write-Host "obs-deps contents:"
-          Get-ChildItem "$env:RUNNER_TEMP\obs-deps" -Depth 0 | Select-Object Name
-
-      - name: Configure CMake
-        shell: pwsh
-        run: |
-          cmake -B build `
-            -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP\obs-deps;$env:RUNNER_TEMP\qt6" `
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
-
-      - name: Build
-        shell: pwsh
-        run: |
-          cmake --build build --config RelWithDebInfo --parallel
-
-      - name: Upload DLL
+      - name: Upload plugin DLL
         uses: actions/upload-artifact@v4
         with:
           name: mybilibili-obs-plugin-windows-x64
-          path: |
-            build/RelWithDebInfo/*.dll
-            build/**/*.pdb
+          path: release/RelWithDebInfo/
 
   build-ubuntu:
     name: Ubuntu x86_64 🐧
@@ -76,12 +46,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake build-essential \
+            cmake build-essential ccache \
             libobs-dev \
             qt6-base-dev libqt6core6 libqt6gui6 libqt6widgets6 \
             libcurl4-openssl-dev
 
-      - name: Configure & Build
+      - name: Build
         run: |
           cmake -B build -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
