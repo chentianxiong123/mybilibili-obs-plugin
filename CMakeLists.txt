@@ -5,11 +5,64 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(libobs REQUIRED)
-find_package(CURL REQUIRED)
+# Dirs from workflow env vars (or default fallbacks)
+if(DEFINED ENV{OBS_SRC_DIR})
+  set(OBS_SRC_DIR $ENV{OBS_SRC_DIR})
+endif()
+if(DEFINED ENV{OBS_DEPS_DIR})
+  set(OBS_DEPS_DIR $ENV{OBS_DEPS_DIR})
+endif()
+if(DEFINED ENV{QT_DIR})
+  set(QT_DIR $ENV{QT_DIR})
+endif()
+
+# ── Qt6 ──────────────────────────────────────────
+set(CMAKE_PREFIX_PATH "${QT_DIR}" ${CMAKE_PREFIX_PATH})
 find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
 
-# Get the git commit hash
+# ── libobs ────────────────────────────────────────
+find_path(OBS_INCLUDE_DIR
+  NAMES obs.h obs.hpp
+  PATHS "${OBS_SRC_DIR}/libobs"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+find_library(OBS_LIBRARY
+  NAMES obs libobs
+  PATHS "${OBS_DEPS_DIR}/lib"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+
+# ── obs-frontend-api ─────────────────────────────
+find_path(OBS_FRONTEND_INCLUDE_DIR
+  NAMES obs-frontend-api.h
+  PATHS "${OBS_SRC_DIR}/UI/obs-frontend-api"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+find_library(OBS_FRONTEND_LIBRARY
+  NAMES obs-frontend-api
+  PATHS "${OBS_DEPS_DIR}/lib"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+
+# ── CURL ──────────────────────────────────────────
+find_library(CURL_LIBRARY
+  NAMES curl libcurl
+  PATHS "${OBS_DEPS_DIR}/lib"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+find_path(CURL_INCLUDE_DIR
+  NAMES curl/curl.h
+  PATHS "${OBS_DEPS_DIR}/include"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+
+# ── Git hash ─────────────────────────────────────
 execute_process(
   COMMAND git rev-parse --short HEAD
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -21,6 +74,7 @@ if(NOT GIT_COMMIT_HASH)
   set(GIT_COMMIT_HASH "unknown")
 endif()
 
+# ── Plugin target ────────────────────────────────
 add_library(${CMAKE_PROJECT_NAME} MODULE
   src/mybili_api.hpp
   src/http_client.hpp
@@ -45,11 +99,17 @@ add_library(${CMAKE_PROJECT_NAME} MODULE
   src/ui/dialog_factory.cpp
 )
 
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE src)
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+  src
+  "${OBS_INCLUDE_DIR}"
+  "${OBS_FRONTEND_INCLUDE_DIR}"
+  "${CURL_INCLUDE_DIR}"
+)
 
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
-  OBS::libobs
-  CURL::libcurl
+  "${OBS_LIBRARY}"
+  "${OBS_FRONTEND_LIBRARY}"
+  "${CURL_LIBRARY}"
   Qt6::Core
   Qt6::Widgets
 )
@@ -59,17 +119,11 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
   GIT_COMMIT_HASH="${GIT_COMMIT_HASH}"
 )
 
-# Suppress specific warnings on MSVC
 if(MSVC)
   target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE /W0)
 endif()
 
-# Set output name
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
   PREFIX ""
   SUFFIX ".dll"
-)
-
-install(TARGETS ${CMAKE_PROJECT_NAME}
-  LIBRARY DESTINATION obs-plugins/64bit
 )
