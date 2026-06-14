@@ -24,25 +24,17 @@ jobs:
       - name: Include VC++ Runtime DLL
         shell: pwsh
         run: |
-          # VS 2022 on CI ships VCRUNTIME140_1.dll in its redist folder.
-          # Our plugin links it at build time, but the user may not have it.
-          $redistDirs = @(
-            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC\14.*\x64\",
-            "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Redist\MSVC\14.*\x64\",
-            "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Redist\MSVC\14.*\x64\"
-          )
-          $found = $false
-          foreach ($pattern in $redistDirs) {
-            $files = Resolve-Path "$pattern\VCRUNTIME140_1.dll" -ErrorAction SilentlyContinue
-            if ($files) {
-              Copy-Item $files[0].Path build_x64\RelWithDebInfo\
-              Write-Host "Copied VCRUNTIME140_1.dll from $($files[0].Path)"
-              $found = $true
-              break
+          # Find VCRUNTIME140_1.dll anywhere on the system.
+          # VS 2022 Enterprise on the CI runner may install to non-default paths.
+          $candidates = Get-ChildItem -Path 'C:\','D:\' -Recurse -Filter 'VCRUNTIME140_1.dll' -ErrorAction SilentlyContinue 2>$null | Select-Object -First 5
+          if ($candidates) {
+            foreach ($f in $candidates) {
+              Write-Host "Found: $($f.FullName)"
             }
-          }
-          if (-not $found) {
-            Write-Warning "VCRUNTIME140_1.dll not found in VS 2022 redist"
+            Copy-Item $candidates[0].FullName build_x64\RelWithDebInfo\ -Force
+            Write-Host "Copied to build_x64\RelWithDebInfo\VCRUNTIME140_1.dll"
+          } else {
+            Write-Warning "VCRUNTIME140_1.dll not found anywhere on CI runner"
           }
 
       - name: Upload artifact
