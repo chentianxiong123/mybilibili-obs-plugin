@@ -21,6 +21,30 @@ jobs:
         shell: pwsh
         run: .\.github\scripts\Build-Windows.ps1
 
+      - name: Include VC++ Runtime DLL
+        shell: pwsh
+        run: |
+          # VS 2022 on CI ships VCRUNTIME140_1.dll in its redist folder.
+          # Our plugin links it at build time, but the user may not have it.
+          $redistDirs = @(
+            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC\14.*\x64\",
+            "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Redist\MSVC\14.*\x64\",
+            "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Redist\MSVC\14.*\x64\"
+          )
+          $found = $false
+          foreach ($pattern in $redistDirs) {
+            $files = Resolve-Path "$pattern\VCRUNTIME140_1.dll" -ErrorAction SilentlyContinue
+            if ($files) {
+              Copy-Item $files[0].Path build_x64\RelWithDebInfo\
+              Write-Host "Copied VCRUNTIME140_1.dll from $($files[0].Path)"
+              $found = $true
+              break
+            }
+          }
+          if (-not $found) {
+            Write-Warning "VCRUNTIME140_1.dll not found in VS 2022 redist"
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
