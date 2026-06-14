@@ -1,80 +1,49 @@
 cmake_minimum_required(VERSION 3.20)
-project(mybilibili-obs-plugin VERSION 1.0.0)
+project(mybilibili-obs-plugin)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)
+# ── Bootstrap the cmake/common build system ─────────────
+# Sets up: CMAKE_MODULE_PATH, OS detection, build types,
+# PLUGIN_VERSION from buildspec.json, etc.
+include(cmake/common/bootstrap.cmake)
 
-# Dirs from workflow env vars (or default fallbacks)
-if(DEFINED ENV{OBS_SRC_DIR})
-  set(OBS_SRC_DIR $ENV{OBS_SRC_DIR})
-endif()
-if(DEFINED ENV{OBS_DEPS_DIR})
-  set(OBS_DEPS_DIR $ENV{OBS_DEPS_DIR})
-endif()
-if(DEFINED ENV{QT_DIR})
-  set(QT_DIR $ENV{QT_DIR})
-endif()
+# ── OS-specific defaults + dependency download ──────────
+# On Windows: includes cmake/windows/buildspec.cmake which
+# calls _check_dependencies_windows() → downloads:
+#   - obs-studio source (for libobs headers & lib)
+#   - obs-deps (prebuilt 3rd-party libs: ffmpeg, curl, ...)
+#   - Qt6
+# Then compiles libobs + obs-frontend-api from source.
+include(defaults)
 
-# ── Qt6 ──────────────────────────────────────────
-set(CMAKE_PREFIX_PATH "${QT_DIR}" ${CMAKE_PREFIX_PATH})
-find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
-
-# ── libobs ────────────────────────────────────────
-find_path(OBS_INCLUDE_DIR
-  NAMES obs.h obs.hpp
-  PATHS "${OBS_SRC_DIR}/libobs"
-  NO_DEFAULT_PATH
-  REQUIRED
-)
-find_library(OBS_LIBRARY
-  NAMES obs libobs
-  PATHS "${OBS_DEPS_DIR}/lib"
-  NO_DEFAULT_PATH
-  REQUIRED
-)
-
-# ── obs-frontend-api ─────────────────────────────
-find_path(OBS_FRONTEND_INCLUDE_DIR
-  NAMES obs-frontend-api.h
-  PATHS "${OBS_SRC_DIR}/UI/obs-frontend-api"
-  NO_DEFAULT_PATH
-  REQUIRED
-)
-find_library(OBS_FRONTEND_LIBRARY
-  NAMES obs-frontend-api
-  PATHS "${OBS_DEPS_DIR}/lib"
-  NO_DEFAULT_PATH
-  REQUIRED
-)
-
-# ── CURL ──────────────────────────────────────────
-find_library(CURL_LIBRARY
-  NAMES curl libcurl
-  PATHS "${OBS_DEPS_DIR}/lib"
-  NO_DEFAULT_PATH
-  REQUIRED
-)
-find_path(CURL_INCLUDE_DIR
-  NAMES curl/curl.h
-  PATHS "${OBS_DEPS_DIR}/include"
-  NO_DEFAULT_PATH
-  REQUIRED
-)
-
-# ── Git hash ─────────────────────────────────────
+# ── Git commit hash ──────────────────────────────────────
 execute_process(
   COMMAND git rev-parse --short HEAD
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  OUTPUT_VARIABLE GIT_COMMIT_HASH
+  OUTPUT_VARIABLE _git_hash
   OUTPUT_STRIP_TRAILING_WHITESPACE
   ERROR_QUIET
 )
-if(NOT GIT_COMMIT_HASH)
-  set(GIT_COMMIT_HASH "unknown")
+if(NOT _git_hash)
+  set(_git_hash "unknown")
 endif()
 
-# ── Plugin target ────────────────────────────────
+# ── Find OBS packages ──────────────────────────────────
+# After _setup_obs_studio(), the OBS Development component
+# is installed to CMAKE_PREFIX_PATH with cmake config files.
+find_package(LibObs REQUIRED)
+find_package(obs-frontend-api REQUIRED)
+
+# ── Qt6 (from obs-deps-qt6) ─────────────────────────────
+find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
+
+# ── CURL (from obs-deps) ────────────────────────────────
+find_path(CURL_INCLUDE_DIR curl/curl.h)
+find_library(CURL_LIBRARY NAMES curl libcurl)
+if(NOT CURL_INCLUDE_DIR OR NOT CURL_LIBRARY)
+  message(FATAL_ERROR "CURL not found in CMAKE_PREFIX_PATH (check obs-deps)")
+endif()
+
+# ── Plugin library ──────────────────────────────────────
 add_library(${CMAKE_PROJECT_NAME} MODULE
   src/mybili_api.hpp
   src/http_client.hpp
@@ -101,24 +70,23 @@ add_library(${CMAKE_PROJECT_NAME} MODULE
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
   src
-  "${OBS_INCLUDE_DIR}"
-  "${OBS_FRONTEND_INCLUDE_DIR}"
-  "${CURL_INCLUDE_DIR}"
+  ${CURL_INCLUDE_DIR}
 )
 
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
-  "${OBS_LIBRARY}"
-  "${OBS_FRONTEND_LIBRARY}"
-  "${CURL_LIBRARY}"
-  Qt6::Core
+  OBS::libobs
+  OBS::obs-frontend-api
   Qt6::Widgets
+  Qt6::Core
+  ${CURL_LIBRARY}
 )
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-  PLUGIN_VERSION_STR="${PROJECT_VERSION}"
-  GIT_COMMIT_HASH="${GIT_COMMIT_HASH}"
+  PLUGIN_VERSION_STR="${PLUGIN_VERSION}"
+  GIT_COMMIT_HASH="${_git_hash}"
 )
 
+# ── Platform tweaks ─────────────────────────────────────
 if(MSVC)
   target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE /W0)
 endif()

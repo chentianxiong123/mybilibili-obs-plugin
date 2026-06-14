@@ -17,42 +17,12 @@ jobs:
       - name: Setup VS
         uses: microsoft/setup-msbuild@v2
 
-      - name: Download OBS SDK + Qt6
-        shell: pwsh
-        run: |
-          # OBS Studio 32.1.2 source (for headers)
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-studio/archive/refs/tags/32.1.2.zip" -OutFile "$env:RUNNER_TEMP\obs-src.zip"
-          Expand-Archive "$env:RUNNER_TEMP\obs-src.zip" -DestinationPath "$env:RUNNER_TEMP\obs-src" -Force
-
-          # obs-deps (prebuilt libs: libobs.lib, curl, etc)
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2026-06-02/windows-deps-2026-06-02-x64.zip" -OutFile "$env:RUNNER_TEMP\obs-deps.zip"
-          mkdir "$env:RUNNER_TEMP\obs-deps" -Force
-          Expand-Archive "$env:RUNNER_TEMP\obs-deps.zip" -DestinationPath "$env:RUNNER_TEMP\obs-deps" -Force
-
-          # Qt6
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2026-06-02/windows-deps-qt6-2026-06-02-x64-RelWithDebInfo.zip" -OutFile "$env:RUNNER_TEMP\qt6.zip"
-          mkdir "$env:RUNNER_TEMP\qt6" -Force
-          Expand-Archive "$env:RUNNER_TEMP\qt6.zip" -DestinationPath "$env:RUNNER_TEMP\qt6" -Force
-
-      - name: Configure
-        shell: pwsh
-        run: |
-          $OBS_SRC = "$env:RUNNER_TEMP\obs-src\obs-studio-32.1.2"
-          $OBS_DEPS = "$env:RUNNER_TEMP\obs-deps"
-          $QT = "$env:RUNNER_TEMP\qt6"
-
-          cmake -B build -G "Visual Studio 17 2022" -A x64 `
-            -DOBS_SRC_DIR="$OBS_SRC" `
-            -DOBS_DEPS_DIR="$OBS_DEPS" `
-            -DQT_DIR="$QT" `
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo
-
       - name: Build
         shell: pwsh
-        run: cmake --build build --config RelWithDebInfo --parallel
+        run: .\.github\scripts\Build-Windows.ps1
 
-      - name: Upload
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mybilibili-obs-plugin-windows
-          path: build/RelWithDebInfo/*.dll
+          name: mybilibili-obs-plugin-windows-x64
+          path: build_x64/RelWithDebInfo/*.dll

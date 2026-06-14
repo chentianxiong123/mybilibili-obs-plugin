@@ -178,7 +178,11 @@ function(_check_dependencies)
 
     if(NOT EXISTS "${dependencies_dir}/${file}")
       message(STATUS "Downloading ${url}")
-      file(DOWNLOAD "${url}" "${dependencies_dir}/${file}" STATUS download_status EXPECTED_HASH SHA256=${hash})
+      if(hash AND NOT hash STREQUAL "")
+        file(DOWNLOAD "${url}" "${dependencies_dir}/${file}" STATUS download_status EXPECTED_HASH SHA256=${hash})
+      else()
+        file(DOWNLOAD "${url}" "${dependencies_dir}/${file}" STATUS download_status)
+      endif()
 
       list(GET download_status 0 error_code)
       list(GET download_status 1 error_message)
@@ -191,7 +195,7 @@ function(_check_dependencies)
       endif()
     endif()
 
-    if(NOT OBS_DEPENDENCY_${dependency}_${arch}_HASH STREQUAL ${hash})
+    if(NOT hash STREQUAL "" AND NOT OBS_DEPENDENCY_${dependency}_${arch}_HASH STREQUAL ${hash})
       file(REMOVE_RECURSE "${dependencies_dir}/${destination}")
     endif()
 
