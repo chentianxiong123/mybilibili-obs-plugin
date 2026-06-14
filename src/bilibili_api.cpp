@@ -22,10 +22,21 @@ static const std::vector<std::string> default_headers = {
 
 static const long REQUEST_TIMEOUT_MS = 10000;
 
+// ── Backend URL ─────────────────────────────────────────
+// Reads MYBILIBILI_API_BASE from environment, falls back to
+// http://localhost:8080 if not set.
+static std::string getApiBase()
+{
+    const char *env = std::getenv("MYBILIBILI_API_BASE");
+    if (env && env[0] != '\0')
+        return std::string(env);
+    return "http://localhost:8080";
+}
+
 // ── Helper ──────────────────────────────────────────────────
 static std::string baseUrl(const std::string &path)
 {
-    return "http://localhost:8080" + path;
+    return getApiBase() + path;
 }
 
 std::vector<std::string> BiliApi::buildHeaders(const std::string &token)
