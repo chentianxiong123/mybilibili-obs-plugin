@@ -1,70 +1,38 @@
-name: Build mybilibili OBS Plugin
+name: Build mybilibili OBS Plugin (Ubuntu)
 
 on:
   push:
     branches: [master, main]
-    tags: ['v*']
   workflow_dispatch:
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            artifact: ubuntu-x86_64
-            ext: so
-          - os: windows-2022
-            artifact: windows-x64
-            ext: dll
-
-    runs-on: ${{ matrix.os }}
-
+  build-ubuntu:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: (Windows) Install vcpkg + deps
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Install vcpkg
-          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-          & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-          # Install OBS, Qt6, CURL via vcpkg
-          & C:\vcpkg\vcpkg install obs-studio:x64-windows qt6:x64-windows curl:x64-windows --clean-after-build
-
-      - name: (Ubuntu) Install system deps
-        if: runner.os == 'Linux'
+      - name: Install deps
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake build-essential \
             libobs-dev \
-            qt6-base-dev qt6-base-dev-tools \
+            qt6-base-dev libqt6core6 libqt6gui6 libqt6widgets6 \
             libcurl4-openssl-dev
 
       - name: Configure
-        shell: pwsh
         run: |
-          if ($env:RUNNER_OS -eq "Windows") {
-            cmake -B build -G "Visual Studio 17 2022" -A x64 `
-              -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-              -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON `
-              -DCMAKE_TOOLCHAIN_FILE="C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
-          } else {
-            cmake -B build -G "Unix Makefiles" `
-              -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-              -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
-          }
+          cmake -B build -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
 
       - name: Build
-        shell: pwsh
-        run: cmake --build build --config RelWithDebInfo --parallel
+        run: cmake --build build --parallel $(nproc)
 
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: mybilibili-obs-plugin-${{ matrix.artifact }}
-          path: build/*.${{ matrix.ext }}
+          name: mybilibili-obs-plugin-ubuntu
+          path: build/*.so
