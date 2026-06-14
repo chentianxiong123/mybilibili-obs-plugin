@@ -1,0 +1,95 @@
+name: Build mybilibili OBS Plugin
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Windows x64 🪟
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Visual Studio
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Download OBS dependencies
+        shell: pwsh
+        run: |
+          # OBS Studio 31.1.1 headers
+          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-studio/archive/refs/tags/31.1.1.zip" -OutFile "$env:RUNNER_TEMP\obs.zip"
+          Expand-Archive "$env:RUNNER_TEMP\obs.zip" -DestinationPath "$env:RUNNER_TEMP\obs-src"
+          Write-Host "OBS headers downloaded"
+
+          # Pre-built deps (libobs, curl, etc)
+          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2025-07-11/obs-deps-windows-x64-2025-07-11.zip" -OutFile "$env:RUNNER_TEMP\obs-deps.zip"
+          Expand-Archive "$env:RUNNER_TEMP\obs-deps.zip" -DestinationPath "$env:RUNNER_TEMP\obs-deps"
+          Write-Host "OBS deps downloaded"
+
+          # Qt6 deps
+          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2025-07-11/qt6-windows-x64-2025-07-11.zip" -OutFile "$env:RUNNER_TEMP\qt6.zip"
+          Expand-Archive "$env:RUNNER_TEMP\qt6.zip" -DestinationPath "$env:RUNNER_TEMP\qt6"
+          Write-Host "Qt6 deps downloaded"
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -B build `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP\obs-deps;$env:RUNNER_TEMP\qt6" `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Upload plugin DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: mybilibili-obs-plugin-windows-x64
+          path: |
+            build/RelWithDebInfo/*.dll
+            build/**/*.pdb
+
+  build-ubuntu:
+    name: Ubuntu x86_64 🐧
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake build-essential \
+            libobs-dev \
+            qt6-base-dev libqt6core6 libqt6gui6 libqt6widgets6 \
+            libcurl4-openssl-dev
+
+      - name: Configure & Build
+        run: |
+          cmake -B build -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
+          cmake --build build --parallel $(nproc)
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: mybilibili-obs-plugin-ubuntu-x86_64
+          path: build/*.so

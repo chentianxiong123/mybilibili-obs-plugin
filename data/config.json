@@ -1,0 +1,10 @@
+{
+    "title": "",
+    "roomId": 0,
+    "userId": 0,
+    "roomName": "我的直播间",
+    "token": "",
+    "refreshToken": "",
+    "streamKey": "",
+    "rtmpAddr": "rtmp://localhost/live"
+}
