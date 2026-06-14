@@ -7,105 +7,64 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
-    name: Windows x64 🪟
-    runs-on: windows-2022
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: ubuntu-x86_64
+            ext: so
+          - os: windows-2022
+            artifact: windows-x64
+            ext: dll
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Visual Studio shell
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Download & extract deps
+      - name: (Windows) Install vcpkg + deps
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Write-Host "Download OBS dependencies..."
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2026-06-02/windows-deps-2026-06-02-x64.zip" -OutFile "$env:RUNNER_TEMP\deps.zip"
-          mkdir "$env:RUNNER_TEMP\obs-deps" -Force
-          Expand-Archive "$env:RUNNER_TEMP\deps.zip" -DestinationPath "$env:RUNNER_TEMP\obs-deps" -Force
+          # Install vcpkg
+          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+          & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          # Install OBS, Qt6, CURL via vcpkg
+          & C:\vcpkg\vcpkg install obs-studio:x64-windows qt6:x64-windows curl:x64-windows --clean-after-build
 
-          Invoke-WebRequest -Uri "https://github.com/obsproject/obs-deps/releases/download/2026-06-02/windows-deps-qt6-2026-06-02-x64-RelWithDebInfo.zip" -OutFile "$env:RUNNER_TEMP\qt6.zip"
-          mkdir "$env:RUNNER_TEMP\qt6" -Force
-          Expand-Archive "$env:RUNNER_TEMP\qt6.zip" -DestinationPath "$env:RUNNER_TEMP\qt6" -Force
-
-          # Show extracted structure to debug
-          Write-Host "=== obs-deps ==="
-          Get-ChildItem "$env:RUNNER_TEMP\obs-deps" -Depth 0 | Select-Object Mode, Name
-          if (Test-Path "$env:RUNNER_TEMP\obs-deps\obs-deps") {
-            Write-Host "Found inner obs-deps dir"
-            $deps_path = "$env:RUNNER_TEMP\obs-deps\obs-deps"
-          } else {
-            $deps_path = "$env:RUNNER_TEMP\obs-deps"
-          }
-          Write-Host "libobs cmake at: $deps_path\lib\cmake\libobs\"
-          Get-ChildItem "$deps_path\lib\cmake\libobs" -Name -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
-
-          Write-Host "=== qt6 ==="
-          Get-ChildItem "$env:RUNNER_TEMP\qt6" -Depth 0 | Select-Object Mode, Name
-          if (Test-Path "$env:RUNNER_TEMP\qt6\qt6") {
-            Write-Host "Found inner qt6 dir"
-            $qt_path = "$env:RUNNER_TEMP\qt6\qt6"
-          } else {
-            $qt_path = "$env:RUNNER_TEMP\qt6"
-          }
-          Get-ChildItem "$qt_path\lib\cmake\Qt6Core" -Name -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  Qt6Core: $_" }
-
-          # Set found paths
-          echo "DEPS_PATH=$deps_path" >> $env:GITHUB_ENV
-          echo "QT_PATH=$qt_path" >> $env:GITHUB_ENV
+      - name: (Ubuntu) Install system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake build-essential \
+            libobs-dev \
+            qt6-base-dev qt6-base-dev-tools \
+            libcurl4-openssl-dev
 
       - name: Configure
         shell: pwsh
         run: |
-          cmake -B build `
-            -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_PREFIX_PATH="$env:DEPS_PATH;$env:QT_PATH" `
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
+          if ($env:RUNNER_OS -eq "Windows") {
+            cmake -B build -G "Visual Studio 17 2022" -A x64 `
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+              -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON `
+              -DCMAKE_TOOLCHAIN_FILE="C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
+          } else {
+            cmake -B build -G "Unix Makefiles" `
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+              -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
+          }
 
       - name: Build
         shell: pwsh
-        run: |
-          cmake --build build --config RelWithDebInfo --parallel
+        run: cmake --build build --config RelWithDebInfo --parallel
 
-      - name: Upload DLL
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mybilibili-obs-plugin-windows-x64
-          path: |
-            build/RelWithDebInfo/mybilibili-obs-plugin.dll
-            build/RelWithDebInfo/*.pdb
-
-  build-ubuntu:
-    name: Ubuntu x86_64 🐧
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake build-essential ccache \
-            libobs-dev \
-            qt6-base-dev libqt6core6 libqt6gui6 libqt6widgets6 \
-            libcurl4-openssl-dev
-
-      - name: Build
-        run: |
-          cmake -B build -G "Unix Makefiles" \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
-          cmake --build build --parallel $(nproc)
-
-      - name: Upload plugin
-        uses: actions/upload-artifact@v4
-        with:
-          name: mybilibili-obs-plugin-ubuntu-x86_64
-          path: build/*.so
+          name: mybilibili-obs-plugin-${{ matrix.artifact }}
+          path: build/*.${{ matrix.ext }}
