@@ -21,4 +21,5 @@ function(_check_dependencies_windows)
   _check_dependencies()
 endfunction()
 
-_check_dependencies_windows()
+# Disable auto-download - deps are provided via CMAKE_PREFIX_PATH
+# _check_dependencies_windows()
