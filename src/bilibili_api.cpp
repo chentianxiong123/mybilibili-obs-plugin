@@ -23,13 +23,46 @@ static const std::vector<std::string> default_headers = {
 static const long REQUEST_TIMEOUT_MS = 10000;
 
 // ── Backend URL ─────────────────────────────────────────
-// Reads MYBILIBILI_API_BASE from environment, falls back to
-// http://localhost:8080 if not set.
+// Priority:
+//   1. MYBILIBILI_API_BASE environment variable
+//   2. <plugin-data-dir>/.env  file (API_BASE=...)
+//   3. http://localhost:8080  (fallback)
 static std::string getApiBase()
 {
+    // 1. Environment variable
     const char *env = std::getenv("MYBILIBILI_API_BASE");
     if (env && env[0] != '\0')
         return std::string(env);
+
+    // 2. .env file in plugin data directory
+    char *envPath = obs_module_file(".env");
+    if (envPath) {
+        FILE *f = fopen(envPath, "r");
+        if (f) {
+            char line[256];
+            while (fgets(line, sizeof(line), f)) {
+                std::string s(line);
+                // Trim whitespace
+                s.erase(0, s.find_first_not_of(" \t\r\n"));
+                s.erase(s.find_last_not_of(" \t\r\n") + 1);
+                if (s.find("API_BASE=") == 0) {
+                    std::string val = s.substr(9);
+                    // Remove optional quotes
+                    if (val.size() >= 2 && val.front() == '"' && val.back() == '"')
+                        val = val.substr(1, val.size() - 2);
+                    fclose(f);
+                    bfree(envPath);
+                    if (!val.empty())
+                        return val;
+                    break;
+                }
+            }
+            fclose(f);
+        }
+        bfree(envPath);
+    }
+
+    // 3. Default fallback
     return "http://localhost:8080";
 }
 
